@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+
+# Enable strict shell mode for safer script execution
+set -o errexit   # Exit on any command failure
+set -o nounset   # Treat unset variables as errors
+set -o pipefail  # Pipeline fails if any command fails
+
 #
 # NAME
 #   redoflacs - BASH commandline FLAC compressor, verifier, organizer,
@@ -47,6 +53,25 @@
 _info() { printf     ' %s %b\n' "$green*$reset" "$@";  }  # Green
 _warn() { printf >&2 ' %s %b\n' "$yellow*$reset" "$@"; }  # Yellow
 _error(){ printf >&2 ' %s %b\n' "$red*$reset" "$@";    }  # Red
+
+#
+# Safe command execution helpers for strict shell mode
+#
+
+# Run command and ignore failures (for cleanup operations)
+_safe_run() {
+  "$@" || true
+}
+
+# Run command that may fail but should not stop script execution
+_try_run() {
+  "$@" 2>/dev/null || true
+}
+
+# Check if command exists without failing
+_command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
 
 #
 # Display help
@@ -469,12 +494,12 @@ _cleanup()
     done
 
     # Remove temporary WAV and FLAC files
-    rm -rf "${temporary_wav_location_sub_dir:-/dev/null/foo}"
-    rm -f "${directory:-/dev/null/foo}"/**/*_redoflacs_$$.wav
-    rm -f "${directory:-/dev/null/foo}"/**/*.tmp,fl-ac+en\'c
+    _safe_run rm -rf "${temporary_wav_location_sub_dir:-/dev/null/foo}"
+    _safe_run rm -f "${directory:-/dev/null/foo}"/**/*_redoflacs_$$.wav
+    _safe_run rm -f "${directory:-/dev/null/foo}"/**/*.tmp,fl-ac+en\'c
 
     # Remove temporary picture blocks (from artwork extraction)
-    rm -f /tmp/redoflacs_picture_blocks.[[:digit:]]*
+    _safe_run rm -f /tmp/redoflacs_picture_blocks.[[:digit:]]*
   fi
 
   # Due to catching an abnormal signal or if there were issues found,
@@ -511,8 +536,8 @@ _cleanup()
   [[ -f "$log_file" ]] && _display_issues_exist
 
   # Remove temporary job FIFO and temporary errors/issues file
-  rm -f "${job_fifo:-/dev/null/foo}"
-  rm -f "${issue_ticks:-/dev/null/foo}"
+  _safe_run rm -f "${job_fifo:-/dev/null/foo}"
+  _safe_run rm -f "${issue_ticks:-/dev/null/foo}"
 
   # Restore terminal cursor
   printf '\033[?25h'
@@ -1081,8 +1106,8 @@ _process_arguments()
     no_extra_tags directory operations global_jobs compress_jobs \
     compress_threads
 
-  local arg invalid op
-  local -a conflicting operations_to_run
+  local arg invalid='' op
+  local -a conflicting=() operations_to_run
 
   # If no arguments are made to the script show usage and help
   if (( $# == 0 )); then
@@ -1319,21 +1344,21 @@ _check_missing_programs()
   local -a missing_programs
 
   for program in "${programs[@]}"; do
-    type -P "$program" >/dev/null || missing_programs+=( "$program" )
+    _command_exists "$program" || missing_programs+=( "$program" )
   done
 
   # auCDtect binary
   if [[ " ${operations[*]} " == *' _aucdtect '* ]]; then
-    type -P auCDtect >/dev/null || missing_programs+=( 'auCDtect' )
+    _command_exists auCDtect || missing_programs+=( 'auCDtect' )
   fi
 
   # Lossless Audio Checker (LAC) binary
   if [[ " ${operations[*]} " == *' _lac '* ]]; then
-    type -P LAC >/dev/null || missing_programs+=( 'LAC' )
+    _command_exists LAC || missing_programs+=( 'LAC' )
   fi
 
   if [[ "$create_spectrogram" ]]; then
-    type -P sox >/dev/null || missing_programs+=( 'sox' )
+    _command_exists sox || missing_programs+=( 'sox' )
   fi
 
   if [[ "${missing_programs[*]}" ]]; then
@@ -1957,7 +1982,7 @@ _lac()
   done < <(LAC "$item_wav")
 
   # Remove temporary WAV file
-  rm -f "${item_wav:-/dev/null/foo}"
+  _safe_run rm -f "${item_wav:-/dev/null/foo}"
 
   # Looks for the result from LAC
   [[ "$rest_of_output" =~ $regex ]]
@@ -2119,7 +2144,7 @@ _aucdtect()
     printf >> "$issue_ticks" '.'  # Add one tick to total issues
 
     # Remove temporary WAV file
-    rm -f "${item_wav:-/dev/null/foo}"
+    _safe_run rm -f "${item_wav:-/dev/null/foo}"
 
     # Update operation title message with current number of issues
     _operation_title
@@ -2131,7 +2156,7 @@ _aucdtect()
     _print_item_ok
 
     # Remove temporary WAV file
-    rm -f "${item_wav:-/dev/null/foo}"
+    _safe_run rm -f "${item_wav:-/dev/null/foo}"
 
     _send_operation_finished
     return
@@ -2169,7 +2194,7 @@ _aucdtect()
     printf >> "$issue_ticks" '.'  # Add one tick to total issues
 
     # Remove temporary WAV file
-    rm -f "${item_wav:-/dev/null/foo}"
+    _safe_run rm -f "${item_wav:-/dev/null/foo}"
 
     # Update operation title message with current number of issues
     _operation_title
@@ -2182,7 +2207,7 @@ _aucdtect()
     _print_item_ok
 
     # Remove temporary WAV file
-    rm -f "${item_wav:-/dev/null/foo}"
+    _safe_run rm -f "${item_wav:-/dev/null/foo}"
 
     _send_operation_finished
     return
@@ -2199,7 +2224,7 @@ _aucdtect()
     printf >> "$issue_ticks" '.'  # Add one tick to total issues
 
     # Remove temporary WAV file
-    rm -f "${item_wav:-/dev/null/foo}"
+    _safe_run rm -f "${item_wav:-/dev/null/foo}"
 
     # Update operation title message with current number of issues
     _operation_title
@@ -2208,7 +2233,7 @@ _aucdtect()
   fi
 
   # Remove temporary WAV file
-  rm -f "${item_wav:-/dev/null/foo}"
+  _safe_run rm -f "${item_wav:-/dev/null/foo}"
 
   # Generate a spectrogram of the current FLAC file and log the
   # results of the operation along with the spectrogram location
@@ -2516,7 +2541,7 @@ _extract_images()
     _print_item_fail
     printf >> "$log_file" '%s [ExtractArtwork] %s\n' "$item" "$error_msg"
     printf >> "$issue_ticks" '.'  # Add one tick to total issues
-    rm -f "${blocks:-/dev/null/foo}"
+    _safe_run rm -f "${blocks:-/dev/null/foo}"
 
     # Update operation title message with current number of issues
     _operation_title
@@ -2527,7 +2552,7 @@ _extract_images()
   # Skip if there were no PICTURE blocks found in current FLAC
   if [[ ! -s "$blocks" ]]; then
     _print_item_skip
-    rm -f "${blocks:-/dev/null/foo}"
+    _safe_run rm -f "${blocks:-/dev/null/foo}"
     _send_operation_finished
     return
   fi
@@ -2571,7 +2596,7 @@ _extract_images()
       unset -v 'block_id' 'art_id' 'art_description' 'mime'
     fi
   done < "$blocks"
-  rm -f "${blocks:-/dev/null/foo}"
+  _safe_run rm -f "${blocks:-/dev/null/foo}"
 
   # Continue only if there was artwork to be extracted
   if [[ -z "${artwork[*]}" ]]; then
@@ -3070,7 +3095,7 @@ for operation in "${operations[@]}"; do
   exec 3<&- 3>&-       # Close file descriptor
 
   # Remove FIFO if it exists
-  rm -f "${job_fifo:-/dev/null/foo}"
+  _safe_run rm -f "${job_fifo:-/dev/null/foo}"
 
   mkfifo "$job_fifo"   # Create FIFO
   exec 3<>"$job_fifo"  # Open file descriptor read/write
