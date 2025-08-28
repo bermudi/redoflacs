@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-
-# Enable strict shell mode for safer script execution
-set -o errexit   # Exit on any command failure
-set -o nounset   # Treat unset variables as errors
-set -o pipefail  # Pipeline fails if any command fails
-
 #
 # NAME
 #   redoflacs - BASH commandline FLAC compressor, verifier, organizer,
@@ -53,51 +47,6 @@ set -o pipefail  # Pipeline fails if any command fails
 _info() { printf     ' %s %b\n' "$green*$reset" "$@";  }  # Green
 _warn() { printf >&2 ' %s %b\n' "$yellow*$reset" "$@"; }  # Yellow
 _error(){ printf >&2 ' %s %b\n' "$red*$reset" "$@";    }  # Red
-
-#
-# Centralized issue logging function
-#
-# Appends standardized lines to the per-run log and updates issue_ticks
-# for consistent issue tracking across all operations
-#
-# Usage: _log_issue item phase message [extra]
-#
-_log_issue()
-{
-  local item="$1" phase="$2" message="$3" extra="$4"
-
-  # Append standardized line to the per-run log
-  if [[ "$extra" ]]; then
-    printf >> "$log_file" '%s [%s] %s %s\n' "$item" "$phase" "$message" "$extra"
-  else
-    printf >> "$log_file" '%s [%s] %s\n' "$item" "$phase" "$message"
-  fi
-
-  # Update issue_ticks to track total number of issues
-  printf >> "$issue_ticks" '.'
-
-  # Update operation title message with current number of issues
-  _operation_title
-}
-
-#
-# Safe command execution helpers for strict shell mode
-#
-
-# Run command and ignore failures (for cleanup operations)
-_safe_run() {
-  "$@" || true
-}
-
-# Run command that may fail but should not stop script execution
-_try_run() {
-  "$@" 2>/dev/null || true
-}
-
-# Check if command exists without failing
-_command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
 
 #
 # Display help
@@ -500,7 +449,7 @@ _print_item_skip() { printf '%b' "\033[${row}H${cyan}skip$reset";   }
 #
 _cleanup()
 {
-   local i fmt op match='' status_banner right_align
+  local i fmt op match status_banner right_align
 
   # Total number of issues found
   local -i issues
@@ -520,12 +469,12 @@ _cleanup()
     done
 
     # Remove temporary WAV and FLAC files
-    _safe_run rm -rf "${temporary_wav_location_sub_dir:-/dev/null/foo}"
-    _safe_run rm -f "${directory:-/dev/null/foo}"/**/*_redoflacs_$$.wav
-    _safe_run rm -f "${directory:-/dev/null/foo}"/**/*.tmp,fl-ac+en\'c
+    rm -rf "${temporary_wav_location_sub_dir:-/dev/null/foo}"
+    rm -f "${directory:-/dev/null/foo}"/**/*_redoflacs_$$.wav
+    rm -f "${directory:-/dev/null/foo}"/**/*.tmp,fl-ac+en\'c
 
-    # Remove the centralized temporary directory and all its contents
-    _safe_run rm -rf "${TMP_DIR:-/dev/null/foo}"
+    # Remove temporary picture blocks (from artwork extraction)
+    rm -f /tmp/redoflacs_picture_blocks.[[:digit:]]*
   fi
 
   # Due to catching an abnormal signal or if there were issues found,
@@ -562,8 +511,8 @@ _cleanup()
   [[ -f "$log_file" ]] && _display_issues_exist
 
   # Remove temporary job FIFO and temporary errors/issues file
-  _safe_run rm -f "${job_fifo:-/dev/null/foo}"
-  _safe_run rm -f "${issue_ticks:-/dev/null/foo}"
+  rm -f "${job_fifo:-/dev/null/foo}"
+  rm -f "${issue_ticks:-/dev/null/foo}"
 
   # Restore terminal cursor
   printf '\033[?25h'
@@ -1105,11 +1054,11 @@ _countdown_metadata()
 #
 _num_issues()
 {
-   local ticks=''
+  local ticks
 
-   # Read in number of issue ticks, hiding missing file output
-   { read -r ticks < "$issue_ticks"; } 2>/dev/null
-   printf '%d' "${#ticks}"  # Return number of ticks (0, if empty)
+  # Read in number of issue ticks, hiding missing file output
+  { read -r ticks < "$issue_ticks"; } 2>/dev/null
+  printf '%d' "${#ticks}"  # Return number of ticks (0, if empty)
 }
 
 #
@@ -1132,8 +1081,8 @@ _process_arguments()
     no_extra_tags directory operations global_jobs compress_jobs \
     compress_threads
 
-  local arg invalid='' op
-  local -a conflicting=() operations_to_run
+  local arg invalid op
+  local -a conflicting operations_to_run
 
   # If no arguments are made to the script show usage and help
   if (( $# == 0 )); then
@@ -1370,21 +1319,21 @@ _check_missing_programs()
   local -a missing_programs
 
   for program in "${programs[@]}"; do
-    _command_exists "$program" || missing_programs+=( "$program" )
+    type -P "$program" >/dev/null || missing_programs+=( "$program" )
   done
 
   # auCDtect binary
   if [[ " ${operations[*]} " == *' _aucdtect '* ]]; then
-    _command_exists auCDtect || missing_programs+=( 'auCDtect' )
+    type -P auCDtect >/dev/null || missing_programs+=( 'auCDtect' )
   fi
 
   # Lossless Audio Checker (LAC) binary
   if [[ " ${operations[*]} " == *' _lac '* ]]; then
-    _command_exists LAC || missing_programs+=( 'LAC' )
+    type -P LAC >/dev/null || missing_programs+=( 'LAC' )
   fi
 
   if [[ "$create_spectrogram" ]]; then
-    _command_exists sox || missing_programs+=( 'sox' )
+    type -P sox >/dev/null || missing_programs+=( 'sox' )
   fi
 
   if [[ "${missing_programs[*]}" ]]; then
@@ -1486,10 +1435,9 @@ _decode_to_wav()
     #     /tmp/tmp_redoflacs_dir.1234.1/music/artist/album/01_redoflacs_1234.wav
     item_wav="${item_wav%.*}_redoflacs_$$.wav"
   else
-    # Use TMP_DIR for WAV files when no user-specified temp location is set
     # Eg: /music/artist/album/01.flac ->
-    #     /tmp/redoflacs_tmp_1234.XXXXXX/01_redoflacs_1234.wav
-    item_wav="${TMP_DIR}/${base}_redoflacs_$$.wav"
+    #     /music/artist/album/01_redoflacs_1234.wav
+    item_wav="${item%.*}_redoflacs_$$.wav"
   fi
 
   _print_item 'Decoding'
@@ -1527,7 +1475,11 @@ _decode_to_wav()
   if [[ "$error_msg" ]]; then
     _print_item_fail
 
-    _log_issue "$item" "$function_label" "$error_msg"
+    printf >> "$log_file" '%s [%s] %s\n' "$item" "$function_label" "$error_msg"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+
+    # Update operation title message with current number of issues
+    _operation_title
 
     # Return 1 to break out of parent fuction
     _send_operation_finished
@@ -1605,12 +1557,16 @@ _generate_spectrogram()
   # Log failures if there are any errors from SoX
   if [[ "$rest_of_output" == 'sox FAIL'* ]]; then
     _print_item_fail
-    _log_issue "$item" "${function_label}:Spectrogram" "$rest_of_output"
+    printf >> "$log_file" \
+      '%s [%s] %s\n' "$item" "${function_label}:Spectrogram" "$rest_of_output"
 
-   # Log operation status as well as generated spectrogram location
-   else
-     _print_item_check
-     _log_issue "$item" "${function_label}:Spectrogram" "$lossless_check_results" "($spectrogram)"
+  # Log operation status as well as generated spectrogram location
+  else
+    _print_item_check
+    printf >> "$log_file" \
+      '%s [%s] %s (%s)\n' \
+      "$item" "${function_label}:Spectrogram" \
+      "$lossless_check_results" "$spectrogram"
   fi
 
   printf >> "$issue_ticks" '.'  # Add one tick to total issues
@@ -1703,10 +1659,11 @@ _replaygain()
   # Log failures if there are any errors
   if [[ "${error_log[0]}" ]]; then
     _print_item_fail
-    # Log each error message individually
-    for error_msg in "${error_log[@]}"; do
-      _log_issue "$item" "ReplayGain" "$error_msg"
-    done
+    printf >> "$log_file" '%s\n' "${error_log[@]}"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+
+    # Update operation title message with current number of issues
+    _operation_title
   else
     _print_item_ok
   fi
@@ -1816,7 +1773,11 @@ _compress()
     _print_item_fail
     error_msg="${error_msg%,}"          # Strip possible trailing comma
     error_msg="${error_msg/$'\n'Type}"  # Strip possible multiline error
-    _log_issue "$item" "Compress" "$error_msg"
+    printf >> "$log_file" '%s [Compress] %s\n' "$item" "$error_msg"
+    printf >> "$issue_ticks" '.'        # Add one tick to total issues
+
+    # Update operation title message with current number of issues
+    _operation_title
     _send_operation_finished
     return
   fi
@@ -1880,7 +1841,11 @@ _test()
   # Log failures if there are any errors
   if [[ "$error_msg" ]]; then
     _print_item_fail
-    _log_issue "$item" "Test" "$error_msg"
+    printf >> "$log_file" '%s [Test] %s\n' "$item" "$error_msg"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+
+    # Update operation title message with current number of issues
+    _operation_title
   else
     _print_item_ok
   fi
@@ -1992,7 +1957,7 @@ _lac()
   done < <(LAC "$item_wav")
 
   # Remove temporary WAV file
-  _safe_run rm -f "${item_wav:-/dev/null/foo}"
+  rm -f "${item_wav:-/dev/null/foo}"
 
   # Looks for the result from LAC
   [[ "$rest_of_output" =~ $regex ]]
@@ -2013,7 +1978,12 @@ _lac()
     && [[ ! "$create_spectrogram" ]]
   then
     _print_item_check
-    _log_issue "$item" 'LAC' "$lossless_check_results"
+    printf >> "$log_file" \
+      '%s [%s] %s\n' "$item" 'LAC' "$lossless_check_results"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+
+    # Update operation title message with current number of issues
+    _operation_title
     _send_operation_finished
     return
   fi
@@ -2144,11 +2114,15 @@ _aucdtect()
   # Log failures if there are any errors
   if [[ "${BASH_REMATCH[1]}" ]]; then
     _print_item_fail
-    _log_issue "$item" 'auCDtect' "${BASH_REMATCH[1]}"
+    printf >> "$log_file" \
+      '%s [%s] %s\n' "$item" 'auCDtect' "${BASH_REMATCH[1]}"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
 
     # Remove temporary WAV file
-    _safe_run rm -f "${item_wav:-/dev/null/foo}"
+    rm -f "${item_wav:-/dev/null/foo}"
 
+    # Update operation title message with current number of issues
+    _operation_title
     _send_operation_finished
     return
 
@@ -2157,7 +2131,7 @@ _aucdtect()
     _print_item_ok
 
     # Remove temporary WAV file
-    _safe_run rm -f "${item_wav:-/dev/null/foo}"
+    rm -f "${item_wav:-/dev/null/foo}"
 
     _send_operation_finished
     return
@@ -2190,11 +2164,15 @@ _aucdtect()
   # Log failures if there are any errors
   if [[ "${BASH_REMATCH[1]}" ]]; then
     _print_item_fail
-    _log_issue "$item" 'auCDtect' "${BASH_REMATCH[1]}"
+    printf >> "$log_file" \
+      '%s [%s] %s\n' "$item" 'auCDtect' "${BASH_REMATCH[1]}"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
 
     # Remove temporary WAV file
-    _safe_run rm -f "${item_wav:-/dev/null/foo}"
+    rm -f "${item_wav:-/dev/null/foo}"
 
+    # Update operation title message with current number of issues
+    _operation_title
     _send_operation_finished
     return
   fi
@@ -2204,7 +2182,7 @@ _aucdtect()
     _print_item_ok
 
     # Remove temporary WAV file
-    _safe_run rm -f "${item_wav:-/dev/null/foo}"
+    rm -f "${item_wav:-/dev/null/foo}"
 
     _send_operation_finished
     return
@@ -2216,17 +2194,21 @@ _aucdtect()
     && [[ ! "$create_spectrogram" ]]
   then
     _print_item_check
-    _log_issue "$item" 'auCDtect' "$lossless_check_results"
+    printf >> "$log_file" \
+      '%s [%s] %s\n' "$item" 'auCDtect' "$lossless_check_results"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
 
     # Remove temporary WAV file
-    _safe_run rm -f "${item_wav:-/dev/null/foo}"
+    rm -f "${item_wav:-/dev/null/foo}"
 
+    # Update operation title message with current number of issues
+    _operation_title
     _send_operation_finished
     return
   fi
 
   # Remove temporary WAV file
-  _safe_run rm -f "${item_wav:-/dev/null/foo}"
+  rm -f "${item_wav:-/dev/null/foo}"
 
   # Generate a spectrogram of the current FLAC file and log the
   # results of the operation along with the spectrogram location
@@ -2260,12 +2242,21 @@ _md5check()
   # Log failures if there are any errors
   if [[ "$error_msg" ]]; then
     _print_item_fail
-    _log_issue "$item" 'MD5check' "$error_msg"
+    printf >> "$log_file" '%s [MD5check] %s\n' "$item" "$error_msg"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+
+    # Update operation title message with current number of issues
+    _operation_title
 
   # Possible valid FLAC, but MD5 signature is unset in STREAMINFO block
   elif [[ "$md5sum" == '00000000000000000000000000000000' ]]; then
     _print_item_fail
-    _log_issue "$item" 'MD5check' 'ERROR: Unset MD5 signature (00000000000000000000000000000000)'
+    printf >> "$log_file" '%s [MD5check] %s\n' "$item" \
+      'ERROR: Unset MD5 signature (00000000000000000000000000000000)'
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+
+    # Update operation title message with current number of issues
+    _operation_title
   else
     _print_item_ok
   fi
@@ -2318,7 +2309,11 @@ _retag()
   # Log failures if there are any errors
   if [[ "$error_msg" ]]; then
     _print_item_fail
-    _log_issue "$item" 'Retag' "$error_msg"
+    printf >> "$log_file" '%s [Retag] %s\n' "$item" "$error_msg"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+
+    # Update operation title message with current number of issues
+    _operation_title
     _send_operation_finished
     return
   fi
@@ -2477,7 +2472,12 @@ _retag()
       fi
     done
 
-    _log_issue "$item" 'Retag' "Missing tags: $missing_tags_str"
+    printf >> "$log_file" \
+      '%s [Retag] Missing tags: %s\n' "$item" "$missing_tags_str"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+
+    # Update operation title message with current number of issues
+    _operation_title
   else
     _print_item_ok
   fi
@@ -2492,7 +2492,7 @@ _extract_images()
 {
   local -a artwork
   local error_msg block_id art_id art_description mime img
-  local blocks="${TMP_DIR}/redoflacs_picture_blocks.$BASHPID"
+  local blocks="/tmp/redoflacs_picture_blocks.$BASHPID"
 
   # Ensure we don't clobber the temporary PICTURE blocks file, eg:
   #   /tmp/redoflacs_picture_blocks.0 -> /tmp/redoflacs_picture_blocks.1
@@ -2514,8 +2514,12 @@ _extract_images()
     error_msg="ERROR ${error_msg##*: ERROR: }"  # Strip filename
 
     _print_item_fail
-    _log_issue "$item" 'ExtractArtwork' "$error_msg"
-    _safe_run rm -f "${blocks:-/dev/null/foo}"
+    printf >> "$log_file" '%s [ExtractArtwork] %s\n' "$item" "$error_msg"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+    rm -f "${blocks:-/dev/null/foo}"
+
+    # Update operation title message with current number of issues
+    _operation_title
     _send_operation_finished
     return
   fi
@@ -2523,7 +2527,7 @@ _extract_images()
   # Skip if there were no PICTURE blocks found in current FLAC
   if [[ ! -s "$blocks" ]]; then
     _print_item_skip
-    _safe_run rm -f "${blocks:-/dev/null/foo}"
+    rm -f "${blocks:-/dev/null/foo}"
     _send_operation_finished
     return
   fi
@@ -2567,7 +2571,7 @@ _extract_images()
       unset -v 'block_id' 'art_id' 'art_description' 'mime'
     fi
   done < "$blocks"
-  _safe_run rm -f "${blocks:-/dev/null/foo}"
+  rm -f "${blocks:-/dev/null/foo}"
 
   # Continue only if there was artwork to be extracted
   if [[ -z "${artwork[*]}" ]]; then
@@ -2656,7 +2660,11 @@ _prune()
   # Log failures if there are any errors
   if [[ "$error_msg" ]]; then
     _print_item_fail
-    _log_issue "$item" 'Prune' "$error_msg"
+    printf >> "$log_file" '%s [Prune] %s\n' "$item" "$error_msg"
+    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+
+    # Update operation title message with current number of issues
+    _operation_title
   else
     _print_item_ok
   fi
@@ -2707,13 +2715,6 @@ if [[ ! -f "$config_file" ]]; then
 else
   _parse_config
 fi
-
-#
-# Initialize variables that may be used before being set
-#
-create_spectrogram=''
-global_jobs=''
-operation=''
 
 #
 # Process/validate script positional parameters. This function provides
@@ -2796,14 +2797,6 @@ if [[ "$temporary_wav_location" ]]; then
   temporary_wav_location_sub_dir="${temporary_wav_location%/}/$user_tmp_dir"
 fi
 
-#
-# Create a single mktemp-based TMP_DIR for all transient files
-#
-# This directory will house FIFO, issue_ticks, picture blocks, and other
-# temporary files, allowing for centralized cleanup
-#
-TMP_DIR="$(mktemp -d "/tmp/redoflacs_tmp_$$.XXXXXX")"
-
 ###############################  MAIN  #################################
 
 export LANG=C
@@ -2821,8 +2814,8 @@ trap '_cleanup; exit $exit_code' EXIT
 # Hide cursor
 printf '\033[?25l'
 
-job_fifo="${TMP_DIR}/redoflacs_fifo_$$"           # Job manager FIFO
-issue_ticks="${TMP_DIR}/redoflacs_issue_file_$$"  # Issues/Errors file
+job_fifo="/tmp/redoflacs_fifo_$$"           # Job manager FIFO
+issue_ticks="/tmp/redoflacs_issue_file_$$"  # Issues/Errors file
 
 # Set FLAC metadata BLOCKS to NOT remove, used when pruning FLAC files
 if [[ "$remove_artwork" == 'true' ]]; then
@@ -3077,7 +3070,7 @@ for operation in "${operations[@]}"; do
   exec 3<&- 3>&-       # Close file descriptor
 
   # Remove FIFO if it exists
-  _safe_run rm -f "${job_fifo:-/dev/null/foo}"
+  rm -f "${job_fifo:-/dev/null/foo}"
 
   mkfifo "$job_fifo"   # Create FIFO
   exec 3<>"$job_fifo"  # Open file descriptor read/write
