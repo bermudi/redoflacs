@@ -55,6 +55,32 @@ _warn() { printf >&2 ' %s %b\n' "$yellow*$reset" "$@"; }  # Yellow
 _error(){ printf >&2 ' %s %b\n' "$red*$reset" "$@";    }  # Red
 
 #
+# Centralized issue logging function
+#
+# Appends standardized lines to the per-run log and updates issue_ticks
+# for consistent issue tracking across all operations
+#
+# Usage: _log_issue item phase message [extra]
+#
+_log_issue()
+{
+  local item="$1" phase="$2" message="$3" extra="$4"
+
+  # Append standardized line to the per-run log
+  if [[ "$extra" ]]; then
+    printf >> "$log_file" '%s [%s] %s %s\n' "$item" "$phase" "$message" "$extra"
+  else
+    printf >> "$log_file" '%s [%s] %s\n' "$item" "$phase" "$message"
+  fi
+
+  # Update issue_ticks to track total number of issues
+  printf >> "$issue_ticks" '.'
+
+  # Update operation title message with current number of issues
+  _operation_title
+}
+
+#
 # Safe command execution helpers for strict shell mode
 #
 
@@ -1501,11 +1527,7 @@ _decode_to_wav()
   if [[ "$error_msg" ]]; then
     _print_item_fail
 
-    printf >> "$log_file" '%s [%s] %s\n' "$item" "$function_label" "$error_msg"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
-
-    # Update operation title message with current number of issues
-    _operation_title
+    _log_issue "$item" "$function_label" "$error_msg"
 
     # Return 1 to break out of parent fuction
     _send_operation_finished
@@ -1583,16 +1605,12 @@ _generate_spectrogram()
   # Log failures if there are any errors from SoX
   if [[ "$rest_of_output" == 'sox FAIL'* ]]; then
     _print_item_fail
-    printf >> "$log_file" \
-      '%s [%s] %s\n' "$item" "${function_label}:Spectrogram" "$rest_of_output"
+    _log_issue "$item" "${function_label}:Spectrogram" "$rest_of_output"
 
-  # Log operation status as well as generated spectrogram location
-  else
-    _print_item_check
-    printf >> "$log_file" \
-      '%s [%s] %s (%s)\n' \
-      "$item" "${function_label}:Spectrogram" \
-      "$lossless_check_results" "$spectrogram"
+   # Log operation status as well as generated spectrogram location
+   else
+     _print_item_check
+     _log_issue "$item" "${function_label}:Spectrogram" "$lossless_check_results" "($spectrogram)"
   fi
 
   printf >> "$issue_ticks" '.'  # Add one tick to total issues
@@ -1685,11 +1703,10 @@ _replaygain()
   # Log failures if there are any errors
   if [[ "${error_log[0]}" ]]; then
     _print_item_fail
-    printf >> "$log_file" '%s\n' "${error_log[@]}"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
-
-    # Update operation title message with current number of issues
-    _operation_title
+    # Log each error message individually
+    for error_msg in "${error_log[@]}"; do
+      _log_issue "$item" "ReplayGain" "$error_msg"
+    done
   else
     _print_item_ok
   fi
@@ -1799,11 +1816,7 @@ _compress()
     _print_item_fail
     error_msg="${error_msg%,}"          # Strip possible trailing comma
     error_msg="${error_msg/$'\n'Type}"  # Strip possible multiline error
-    printf >> "$log_file" '%s [Compress] %s\n' "$item" "$error_msg"
-    printf >> "$issue_ticks" '.'        # Add one tick to total issues
-
-    # Update operation title message with current number of issues
-    _operation_title
+    _log_issue "$item" "Compress" "$error_msg"
     _send_operation_finished
     return
   fi
@@ -1867,11 +1880,7 @@ _test()
   # Log failures if there are any errors
   if [[ "$error_msg" ]]; then
     _print_item_fail
-    printf >> "$log_file" '%s [Test] %s\n' "$item" "$error_msg"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
-
-    # Update operation title message with current number of issues
-    _operation_title
+    _log_issue "$item" "Test" "$error_msg"
   else
     _print_item_ok
   fi
@@ -2004,12 +2013,7 @@ _lac()
     && [[ ! "$create_spectrogram" ]]
   then
     _print_item_check
-    printf >> "$log_file" \
-      '%s [%s] %s\n' "$item" 'LAC' "$lossless_check_results"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
-
-    # Update operation title message with current number of issues
-    _operation_title
+    _log_issue "$item" 'LAC' "$lossless_check_results"
     _send_operation_finished
     return
   fi
@@ -2140,15 +2144,11 @@ _aucdtect()
   # Log failures if there are any errors
   if [[ "${BASH_REMATCH[1]}" ]]; then
     _print_item_fail
-    printf >> "$log_file" \
-      '%s [%s] %s\n' "$item" 'auCDtect' "${BASH_REMATCH[1]}"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+    _log_issue "$item" 'auCDtect' "${BASH_REMATCH[1]}"
 
     # Remove temporary WAV file
     _safe_run rm -f "${item_wav:-/dev/null/foo}"
 
-    # Update operation title message with current number of issues
-    _operation_title
     _send_operation_finished
     return
 
@@ -2190,15 +2190,11 @@ _aucdtect()
   # Log failures if there are any errors
   if [[ "${BASH_REMATCH[1]}" ]]; then
     _print_item_fail
-    printf >> "$log_file" \
-      '%s [%s] %s\n' "$item" 'auCDtect' "${BASH_REMATCH[1]}"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+    _log_issue "$item" 'auCDtect' "${BASH_REMATCH[1]}"
 
     # Remove temporary WAV file
     _safe_run rm -f "${item_wav:-/dev/null/foo}"
 
-    # Update operation title message with current number of issues
-    _operation_title
     _send_operation_finished
     return
   fi
@@ -2220,15 +2216,11 @@ _aucdtect()
     && [[ ! "$create_spectrogram" ]]
   then
     _print_item_check
-    printf >> "$log_file" \
-      '%s [%s] %s\n' "$item" 'auCDtect' "$lossless_check_results"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+    _log_issue "$item" 'auCDtect' "$lossless_check_results"
 
     # Remove temporary WAV file
     _safe_run rm -f "${item_wav:-/dev/null/foo}"
 
-    # Update operation title message with current number of issues
-    _operation_title
     _send_operation_finished
     return
   fi
@@ -2268,21 +2260,12 @@ _md5check()
   # Log failures if there are any errors
   if [[ "$error_msg" ]]; then
     _print_item_fail
-    printf >> "$log_file" '%s [MD5check] %s\n' "$item" "$error_msg"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
-
-    # Update operation title message with current number of issues
-    _operation_title
+    _log_issue "$item" 'MD5check' "$error_msg"
 
   # Possible valid FLAC, but MD5 signature is unset in STREAMINFO block
   elif [[ "$md5sum" == '00000000000000000000000000000000' ]]; then
     _print_item_fail
-    printf >> "$log_file" '%s [MD5check] %s\n' "$item" \
-      'ERROR: Unset MD5 signature (00000000000000000000000000000000)'
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
-
-    # Update operation title message with current number of issues
-    _operation_title
+    _log_issue "$item" 'MD5check' 'ERROR: Unset MD5 signature (00000000000000000000000000000000)'
   else
     _print_item_ok
   fi
@@ -2335,11 +2318,7 @@ _retag()
   # Log failures if there are any errors
   if [[ "$error_msg" ]]; then
     _print_item_fail
-    printf >> "$log_file" '%s [Retag] %s\n' "$item" "$error_msg"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
-
-    # Update operation title message with current number of issues
-    _operation_title
+    _log_issue "$item" 'Retag' "$error_msg"
     _send_operation_finished
     return
   fi
@@ -2498,12 +2477,7 @@ _retag()
       fi
     done
 
-    printf >> "$log_file" \
-      '%s [Retag] Missing tags: %s\n' "$item" "$missing_tags_str"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
-
-    # Update operation title message with current number of issues
-    _operation_title
+    _log_issue "$item" 'Retag' "Missing tags: $missing_tags_str"
   else
     _print_item_ok
   fi
@@ -2540,12 +2514,8 @@ _extract_images()
     error_msg="ERROR ${error_msg##*: ERROR: }"  # Strip filename
 
     _print_item_fail
-    printf >> "$log_file" '%s [ExtractArtwork] %s\n' "$item" "$error_msg"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
+    _log_issue "$item" 'ExtractArtwork' "$error_msg"
     _safe_run rm -f "${blocks:-/dev/null/foo}"
-
-    # Update operation title message with current number of issues
-    _operation_title
     _send_operation_finished
     return
   fi
@@ -2686,11 +2656,7 @@ _prune()
   # Log failures if there are any errors
   if [[ "$error_msg" ]]; then
     _print_item_fail
-    printf >> "$log_file" '%s [Prune] %s\n' "$item" "$error_msg"
-    printf >> "$issue_ticks" '.'  # Add one tick to total issues
-
-    # Update operation title message with current number of issues
-    _operation_title
+    _log_issue "$item" 'Prune' "$error_msg"
   else
     _print_item_ok
   fi

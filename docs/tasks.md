@@ -4,7 +4,7 @@
 - [x] 2. Managed temporary workspace
   - Create a single mktemp-based TMP_DIR; place FIFO, issue_ticks, picture blocks, and other transient files inside; prune everything in one cleanup path.
 
-- [ ] 3. Centralized issue logging
+- [x] 3. Centralized issue logging
   - Provide a _log_issue(item, phase, message[, extra]) that appends standardized lines to the per-run log and updates issue_ticks; use consistently across operations.
 
 - [ ] 4. Find-based file discovery with deterministic order
