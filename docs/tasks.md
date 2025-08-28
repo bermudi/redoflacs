@@ -1,7 +1,7 @@
-- [ ] 1. Strict shell mode with safe wrappers
+- [x] 1. Strict shell mode with safe wrappers
   - Enable errexit, nounset, pipefail; add deliberate guards (e.g., || true) and central helpers so failures are surfaced without breaking intentional flows.
 
-- [ ] 2. Managed temporary workspace
+- [x] 2. Managed temporary workspace
   - Create a single mktemp-based TMP_DIR; place FIFO, issue_ticks, picture blocks, and other transient files inside; prune everything in one cleanup path.
 
 - [ ] 3. Centralized issue logging

@@ -474,7 +474,7 @@ _print_item_skip() { printf '%b' "\033[${row}H${cyan}skip$reset";   }
 #
 _cleanup()
 {
-  local i fmt op match status_banner right_align
+   local i fmt op match='' status_banner right_align
 
   # Total number of issues found
   local -i issues
@@ -498,8 +498,8 @@ _cleanup()
     _safe_run rm -f "${directory:-/dev/null/foo}"/**/*_redoflacs_$$.wav
     _safe_run rm -f "${directory:-/dev/null/foo}"/**/*.tmp,fl-ac+en\'c
 
-    # Remove temporary picture blocks (from artwork extraction)
-    _safe_run rm -f /tmp/redoflacs_picture_blocks.[[:digit:]]*
+    # Remove the centralized temporary directory and all its contents
+    _safe_run rm -rf "${TMP_DIR:-/dev/null/foo}"
   fi
 
   # Due to catching an abnormal signal or if there were issues found,
@@ -1079,11 +1079,11 @@ _countdown_metadata()
 #
 _num_issues()
 {
-  local ticks
+   local ticks=''
 
-  # Read in number of issue ticks, hiding missing file output
-  { read -r ticks < "$issue_ticks"; } 2>/dev/null
-  printf '%d' "${#ticks}"  # Return number of ticks (0, if empty)
+   # Read in number of issue ticks, hiding missing file output
+   { read -r ticks < "$issue_ticks"; } 2>/dev/null
+   printf '%d' "${#ticks}"  # Return number of ticks (0, if empty)
 }
 
 #
@@ -1460,9 +1460,10 @@ _decode_to_wav()
     #     /tmp/tmp_redoflacs_dir.1234.1/music/artist/album/01_redoflacs_1234.wav
     item_wav="${item_wav%.*}_redoflacs_$$.wav"
   else
+    # Use TMP_DIR for WAV files when no user-specified temp location is set
     # Eg: /music/artist/album/01.flac ->
-    #     /music/artist/album/01_redoflacs_1234.wav
-    item_wav="${item%.*}_redoflacs_$$.wav"
+    #     /tmp/redoflacs_tmp_1234.XXXXXX/01_redoflacs_1234.wav
+    item_wav="${TMP_DIR}/${base}_redoflacs_$$.wav"
   fi
 
   _print_item 'Decoding'
@@ -2517,7 +2518,7 @@ _extract_images()
 {
   local -a artwork
   local error_msg block_id art_id art_description mime img
-  local blocks="/tmp/redoflacs_picture_blocks.$BASHPID"
+  local blocks="${TMP_DIR}/redoflacs_picture_blocks.$BASHPID"
 
   # Ensure we don't clobber the temporary PICTURE blocks file, eg:
   #   /tmp/redoflacs_picture_blocks.0 -> /tmp/redoflacs_picture_blocks.1
@@ -2742,6 +2743,13 @@ else
 fi
 
 #
+# Initialize variables that may be used before being set
+#
+create_spectrogram=''
+global_jobs=''
+operation=''
+
+#
 # Process/validate script positional parameters. This function provides
 # variables which are used by later functions/operations (based on
 # whether certain operations are specified)
@@ -2822,6 +2830,14 @@ if [[ "$temporary_wav_location" ]]; then
   temporary_wav_location_sub_dir="${temporary_wav_location%/}/$user_tmp_dir"
 fi
 
+#
+# Create a single mktemp-based TMP_DIR for all transient files
+#
+# This directory will house FIFO, issue_ticks, picture blocks, and other
+# temporary files, allowing for centralized cleanup
+#
+TMP_DIR="$(mktemp -d "/tmp/redoflacs_tmp_$$.XXXXXX")"
+
 ###############################  MAIN  #################################
 
 export LANG=C
@@ -2839,8 +2855,8 @@ trap '_cleanup; exit $exit_code' EXIT
 # Hide cursor
 printf '\033[?25l'
 
-job_fifo="/tmp/redoflacs_fifo_$$"           # Job manager FIFO
-issue_ticks="/tmp/redoflacs_issue_file_$$"  # Issues/Errors file
+job_fifo="${TMP_DIR}/redoflacs_fifo_$$"           # Job manager FIFO
+issue_ticks="${TMP_DIR}/redoflacs_issue_file_$$"  # Issues/Errors file
 
 # Set FLAC metadata BLOCKS to NOT remove, used when pruning FLAC files
 if [[ "$remove_artwork" == 'true' ]]; then
