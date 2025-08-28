@@ -87,6 +87,10 @@ track numbers.
 **-T**[*N*]
 : Allow N threads for compression >= FLAC 1.5.0 (default: *2*)
 
+**--dry-run**, **-d**
+: Perform a dry run, showing what actions would be taken without making any
+changes to the filesystem.
+
 **-n**
 : Disable colored output
 

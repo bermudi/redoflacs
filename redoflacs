@@ -75,6 +75,7 @@ Options:
   -j[N]    Allow N jobs at once (default: all cores, or 2 if unknown)
   -J[N]    Allow N jobs for compression >= FLAC 1.5.0 (default: cores/threads)
   -T[N]    Allow N threads for compression >= FLAC 1.5.0 (default: 2)
+  -d       Perform a dry run without making any changes
   -n       Disable color output
   -x       Do not apply COMPRESSION tag when compressing FLAC files
   -o       Generate a new configuration file and exit
@@ -602,6 +603,11 @@ _scroll_terminal()
 #
 _create_config()
 {
+  if [[ "$dry_run" ]]; then
+    _info "DRY-RUN: Would create configuration file at: ${config_file}"
+    return
+  fi
+
   local -i item=0
 
   # Ensure the parent directory exists
@@ -1079,10 +1085,10 @@ _process_arguments()
   # Global variables used in other functions/operations
   local -g create_spectrogram force_compression force_replaygain \
     no_extra_tags directory operations global_jobs compress_jobs \
-    compress_threads
+    compress_threads dry_run
 
   local arg invalid op
-  local -a conflicting operations_to_run
+  local -a conflicting operations_to_run args=()
 
   # If no arguments are made to the script show usage and help
   if (( $# == 0 )); then
@@ -1090,9 +1096,19 @@ _process_arguments()
     exit 1
   fi
 
+  # Handle long options
+  while (( $# > 0 )); do
+    case "$1" in
+      --dry-run) args+=(-d) ;;
+      *) args+=("$1") ;;
+    esac
+    shift
+  done
+  set -- "${args[@]}"
+
   # Processes all the possible positional parameters, short options
   # only, handling conflicting parameters
-  while getopts ':j:J:T:mtcCaAgLlGrepnhvox' arg "$@"; do
+  while getopts ':j:J:T:mtcCaAgLlGrepnhvoxd' arg "$@"; do
     case "$arg" in
       # Given argument is not valid. 'OPTARG' is 'arg' before 'arg' is
       # set to '?'
@@ -1116,6 +1132,9 @@ _process_arguments()
 
       # Create a new configuration file and exit
       'o') _create_config; exit 0 ;;
+
+      # Dry run
+      'd') dry_run='true' ;;
 
       # Disable color output
       'n') unset -v 'reset' 'red' 'green' 'yellow' 'blue' 'magenta' 'cyan' ;;
@@ -1520,6 +1539,13 @@ _generate_spectrogram()
   # in the location as the current item or a user-defined location
   _print_item 'Spectrogram'
 
+  if [[ "$dry_run" ]]; then
+    _print_item 'Dry-run: Generating spectrogram'
+    _print_item_ok
+    _send_operation_finished
+    return
+  fi
+
   # Ensure we don't clobber the spectrogram, eg:
   #   /music/artist/album/file.flac.spec.png.0 ->
   #   /music/artist/album/file.flac.spec.png.1
@@ -1626,6 +1652,13 @@ _replaygain()
 
   _print_item_half  # Metaflac doesn't display a percentage complete
 
+  if [[ "$dry_run" ]]; then
+    _print_item 'Dry-run: ReplayGain'
+    _print_item_ok
+    _send_operation_finished
+    return
+  fi
+
   # Since this operation applies to multiple files in a given directory,
   # all error messages (per file) is stored into an array, then logged
   # to a file
@@ -1686,6 +1719,13 @@ _compress()
   local base="${item##*[ /]}"
 
   _print_item 'Compressing'
+
+  if [[ "$dry_run" ]]; then
+    _print_item 'Dry-run: Compressing'
+    _print_item_ok
+    _send_operation_finished
+    return
+  fi
 
   # If a user chooses not to force compression, then each file is
   # checked for a 'COMPRESSION' tag that matches the compression level
@@ -2280,6 +2320,13 @@ _retag()
 
   _print_item 'Retagging'
 
+  if [[ "$dry_run" ]]; then
+    _print_item 'Dry-run: Retagging'
+    _print_item_ok
+    _send_operation_finished
+    return
+  fi
+
   # Extracts the first tag from the list of tags to keep and does error
   # handling on this operation. Other extracted tags are processeed in
   # the following loop after the error handling
@@ -2579,6 +2626,13 @@ _extract_images()
     return
   fi
 
+  if [[ "$dry_run" ]]; then
+    _print_item 'Dry-run: Extracting images'
+    _print_item_ok
+    _send_operation_finished
+    return
+  fi
+
   # Determine where to put extracted artwork by checking user config
   if [[ "$artwork_location" ]]; then
     # Eg: /media/images -> /media/images/artist/album/file.flac
@@ -2640,6 +2694,13 @@ _prune()
 
   _print_item 'Pruning'
   _print_item_half  # Metaflac doesn't display a percentage complete
+
+  if [[ "$dry_run" ]]; then
+    _print_item 'Dry-run: Pruning'
+    _print_item_ok
+    _send_operation_finished
+    return
+  fi
 
   # Remove all information but STREAMINFO,VORBIS_COMMENTs, and
   # possibly METADATA_BLOCK_PICTURE
@@ -2707,21 +2768,21 @@ shopt -s nocaseglob 2>/dev/null
 config_file="${HOME}/.config/redoflacs/config"
 
 #
-# Create a new configuration file if one does not exist
-#
-if [[ ! -f "$config_file" ]]; then
-  _create_config
-  exit 0
-else
-  _parse_config
-fi
-
-#
 # Process/validate script positional parameters. This function provides
 # variables which are used by later functions/operations (based on
 # whether certain operations are specified)
 #
 _process_arguments "$@"
+
+#
+# Create a new configuration file if one does not exist
+#
+if [[ ! -f "$config_file" ]]; then
+  _create_config
+  exit 0
+fi
+
+_parse_config
 
 #
 # Check for missing programs required by this script
